@@ -42,9 +42,9 @@ Business data will be stored locally in the browser, primarily in IndexedDB. Bro
 
 V1 must include export and import of all business data as JSON. Import must validate the payload before replacing local data and must warn the user that the operation replaces current browser data.
 
-## Future Development Commands
+## Development Commands
 
-The first implementation commit should add the app scaffold and these commands:
+The static app scaffold supports these commands:
 
 ```bash
 npm install
@@ -53,4 +53,3 @@ npm run build
 ```
 
 The production build must generate a static export that can be served from GitHub Pages.
-
