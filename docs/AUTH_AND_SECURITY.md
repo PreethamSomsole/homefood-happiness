@@ -10,7 +10,7 @@ This model is acceptable for a GitHub Pages static app because there is no trust
 
 The README, setup screen, and settings screen should make this clear:
 
-- The password protects data from casual viewing in this browser profile.
+- The username and password protect data from casual viewing in this browser profile.
 - The app stores business data locally in the browser.
 - A technical user with access to the browser profile can inspect or modify local storage.
 - Clearing browser data can delete app data unless the user exports a backup.
@@ -28,8 +28,8 @@ export type AuthStatus =
 
 export interface AuthProvider {
   getStatus(): Promise<AuthStatus>
-  setupPassword(password: string): Promise<void>
-  signIn(password: string): Promise<void>
+  setupPassword(username: string, password: string): Promise<void>
+  signIn(username: string, password: string): Promise<void>
   signOut(): Promise<void>
   changePassword(oldPassword: string, newPassword: string): Promise<void>
   resetLocalApp(confirmText: string): Promise<void>
@@ -74,4 +74,3 @@ Resetting the app should:
 - Require explicit confirmation text such as `DELETE`.
 - Clear auth settings and business data.
 - Return the app to first-run setup.
-

@@ -1,6 +1,7 @@
 'use client'
 
 import { FormEvent, useEffect, useMemo, useState } from 'react'
+import { getAuthStatus, setupAuth, signIn, signOut, type AuthStatus } from '../lib/auth'
 import { exportBusinessData, loadBusinessData, saveOrder } from '../lib/database'
 import type { BusinessData, CustomerOrder, OrderStatus, PaymentMethod } from '../lib/types'
 
@@ -25,39 +26,57 @@ const nextFriday = () => {
 }
 
 export default function Home() {
+  const [authStatus, setAuthStatus] = useState<AuthStatus | null>(null)
+  const [authError, setAuthError] = useState('')
   const [data, setData] = useState<BusinessData>(EMPTY)
-  const [loading, setLoading] = useState(true)
+  const [hasLoadedData, setHasLoadedData] = useState(false)
   const [error, setError] = useState('')
   const [showOrderForm, setShowOrderForm] = useState(false)
 
   const refresh = async () => {
+    setHasLoadedData(false)
     try {
       setData(await loadBusinessData())
       setError('')
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'The local database could not be opened.')
     } finally {
-      setLoading(false)
+      setHasLoadedData(true)
     }
   }
 
   useEffect(() => {
+    let cancelled = false
+    getAuthStatus()
+      .then((status) => {
+        if (!cancelled) setAuthStatus(status)
+      })
+      .catch((cause: unknown) => {
+        if (!cancelled) setAuthError(cause instanceof Error ? cause.message : 'The local login could not be loaded.')
+      })
+    return () => { cancelled = true }
+  }, [])
+
+  useEffect(() => {
+    if (authStatus?.state !== 'unlocked') return
+
     let cancelled = false
     loadBusinessData()
       .then((businessData) => {
         if (!cancelled) {
           setData(businessData)
           setError('')
+          setHasLoadedData(true)
         }
       })
       .catch((cause: unknown) => {
-        if (!cancelled) setError(cause instanceof Error ? cause.message : 'The local database could not be opened.')
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false)
+        if (!cancelled) {
+          setError(cause instanceof Error ? cause.message : 'The local database could not be opened.')
+          setHasLoadedData(true)
+        }
       })
     return () => { cancelled = true }
-  }, [])
+  }, [authStatus])
 
   const summary = useMemo(() => {
     const revenue = data.orders.filter((order) => order.status === 'paid').reduce((sum, order) => sum + orderTotal(order), 0)
@@ -79,6 +98,52 @@ export default function Home() {
     URL.revokeObjectURL(anchor.href)
   }
 
+  const handleUnlock = async (username: string, password: string) => {
+    const result = await signIn(username, password)
+    setAuthError('')
+    setHasLoadedData(false)
+    setAuthStatus({ state: 'unlocked', username: result.username })
+  }
+
+  const handleSetup = async (username: string, password: string) => {
+    const result = await setupAuth(username, password)
+    setAuthError('')
+    setHasLoadedData(false)
+    setAuthStatus({ state: 'unlocked', username: result.username })
+  }
+
+  const handleSignOut = async () => {
+    await signOut()
+    const status = await getAuthStatus()
+    setHasLoadedData(false)
+    setAuthStatus(status)
+    setShowOrderForm(false)
+  }
+
+  if (authStatus === null) {
+    return (
+      <main className="app-shell auth-shell text-primary">
+        <div className="auth-card auth-card--loading">Checking local login…</div>
+      </main>
+    )
+  }
+
+  if (authStatus.state === 'needs_setup') {
+    return (
+      <main className="app-shell auth-shell text-primary">
+        <AuthSetupCard error={authError} onSubmit={handleSetup} />
+      </main>
+    )
+  }
+
+  if (authStatus.state === 'locked') {
+    return (
+      <main className="app-shell auth-shell text-primary">
+        <AuthSignInCard error={authError} username={authStatus.username} onSubmit={handleUnlock} />
+      </main>
+    )
+  }
+
   return (
     <main className="app-shell min-h-screen text-primary">
       <aside className="side-nav">
@@ -92,11 +157,11 @@ export default function Home() {
       <div className="content-shell">
         <header className="top-bar">
           <div><div className="mobile-brandline"><span className="mobile-brand-mark">HH</span><span>Homefood Happiness</span></div><p className="section-kicker">Business dashboard</p><h2>Orders and cashflow</h2></div>
-          <div className="top-actions"><button className="button-secondary" onClick={() => void handleExport()}>Export data</button><button className="button-primary" onClick={() => setShowOrderForm((open) => !open)}>+ New order</button></div>
+          <div className="top-actions"><button className="button-secondary" onClick={() => void handleExport()}>Export data</button><button className="button-primary" onClick={() => setShowOrderForm((open) => !open)}>+ New order</button><button className="button-secondary" onClick={() => void handleSignOut()}>Sign out</button></div>
         </header>
 
         {error && <div className="error-banner">{error}</div>}
-        {loading ? <div className="panel loading-panel">Opening local database…</div> : (
+        {!hasLoadedData ? <div className="panel loading-panel">Opening local database…</div> : (
           <section id="dashboard" className="dashboard-grid">
             <section className="overview-band">
               <div className="overview-copy"><p className="section-kicker">Current records</p><h3>{data.orders.length} orders across {data.products.length} products.</h3><p>Spreadsheet history is stored locally with price snapshots, event timestamps, payment status, and explicit markers for estimated dates.</p></div>
@@ -138,6 +203,107 @@ export default function Home() {
       </div>
       <nav className="mobile-nav" aria-label="Mobile primary">{navItems.map((item, index) => <a href={`#${item.toLowerCase().replace(' ', '-')}`} aria-current={index === 0 ? 'page' : undefined} key={item}><Icon index={index} /><span>{item}</span></a>)}</nav>
     </main>
+  )
+}
+
+function AuthSetupCard({
+  error,
+  onSubmit,
+}: {
+  error: string
+  onSubmit: (username: string, password: string) => Promise<void>
+}) {
+  const [username, setUsername] = useState('')
+  const [password, setPassword] = useState('')
+  const [confirmPassword, setConfirmPassword] = useState('')
+  const [submitting, setSubmitting] = useState(false)
+  const [localError, setLocalError] = useState('')
+
+  const submit = async (event: FormEvent) => {
+    event.preventDefault()
+    if (password !== confirmPassword) {
+      setLocalError('Passwords do not match.')
+      return
+    }
+
+    setSubmitting(true)
+    setLocalError('')
+    try {
+      await onSubmit(username, password)
+    } catch (cause) {
+      setLocalError(cause instanceof Error ? cause.message : 'Login setup failed.')
+      setSubmitting(false)
+      return
+    }
+  }
+
+  return (
+    <section className="auth-card">
+      <div className="auth-hero">
+        <span className="auth-kicker">Local lock</span>
+        <h1>Create username and password</h1>
+        <p>This login protects data only in this browser profile. It is not secure hosted authentication.</p>
+      </div>
+      <form className="auth-form" onSubmit={(event) => void submit(event)}>
+        <label>Username<input required value={username} onChange={(event) => setUsername(event.target.value)} /></label>
+        <label>Password<input required minLength={8} type="password" value={password} onChange={(event) => setPassword(event.target.value)} /></label>
+        <label>Confirm password<input required minLength={8} type="password" value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} /></label>
+        {(error || localError) && <div className="error-banner auth-error">{localError || error}</div>}
+        <button className="button-primary auth-submit" disabled={submitting}>{submitting ? 'Creating…' : 'Create local login'}</button>
+      </form>
+      <div className="auth-note">
+        <strong>Important</strong>
+        <span>Anyone with access to this browser profile can still inspect or clear local storage.</span>
+      </div>
+    </section>
+  )
+}
+
+function AuthSignInCard({
+  error,
+  username,
+  onSubmit,
+}: {
+  error: string
+  username: string
+  onSubmit: (username: string, password: string) => Promise<void>
+}) {
+  const [formUsername, setFormUsername] = useState(username)
+  const [password, setPassword] = useState('')
+  const [submitting, setSubmitting] = useState(false)
+  const [localError, setLocalError] = useState('')
+
+  const submit = async (event: FormEvent) => {
+    event.preventDefault()
+    setSubmitting(true)
+    setLocalError('')
+    try {
+      await onSubmit(formUsername, password)
+    } catch (cause) {
+      setLocalError(cause instanceof Error ? cause.message : 'Sign in failed.')
+      setSubmitting(false)
+      return
+    }
+  }
+
+  return (
+    <section className="auth-card">
+      <div className="auth-hero">
+        <span className="auth-kicker">Local lock</span>
+        <h1>Sign in to this browser</h1>
+        <p>Unlocks the saved business data for this tab session only.</p>
+      </div>
+      <form className="auth-form" onSubmit={(event) => void submit(event)}>
+        <label>Username<input required value={formUsername} onChange={(event) => setFormUsername(event.target.value)} /></label>
+        <label>Password<input required type="password" value={password} onChange={(event) => setPassword(event.target.value)} /></label>
+        {(error || localError) && <div className="error-banner auth-error">{localError || error}</div>}
+        <button className="button-primary auth-submit" disabled={submitting}>{submitting ? 'Signing in…' : 'Unlock dashboard'}</button>
+      </form>
+      <div className="auth-note">
+        <strong>Stored locally</strong>
+        <span>The username and salted password hash stay in browser storage on this device.</span>
+      </div>
+    </section>
   )
 }
 

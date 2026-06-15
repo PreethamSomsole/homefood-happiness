@@ -11,7 +11,7 @@ The v1 app will help track raw materials, purchases, expenses, product recipes, 
 - Styling: Tailwind CSS.
 - Hosting: GitHub Pages project site.
 - Persistence: IndexedDB in the user's browser.
-- Auth model: local app lock using a password or passcode hash stored in browser storage.
+- Auth model: local app lock using a username and password hash stored in browser storage.
 - Data access: repository interfaces, so local storage can later be replaced by Supabase, Firebase, Postgres, or another hosted backend.
 
 See [Architecture](docs/ARCHITECTURE.md) and [Implementation Plan](docs/IMPLEMENTATION_PLAN.md) for the full v1 plan.
@@ -32,7 +32,7 @@ All core v1 behavior must work in the browser after static export.
 
 V1 authentication is a local device privacy lock, not real hosted authentication.
 
-The app will require a local password or passcode before showing business data. The password itself must not be stored. A salted hash should be stored locally using the Web Crypto API. This protects casual access on the same browser profile, but it does not protect against a technical user who can inspect or modify browser storage and JavaScript.
+The app will require a local username and password before showing business data. The password itself must not be stored. A salted hash should be stored locally using the Web Crypto API. This protects casual access on the same browser profile, but it does not protect against a technical user who can inspect or modify browser storage and JavaScript.
 
 For real account authentication and cross-device sync, a later version should move to Supabase Auth, Firebase Auth, Clerk, Auth0, or a custom backend.
 
